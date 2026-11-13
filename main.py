@@ -1,7 +1,7 @@
-"""自迭代外置大脑：把 iter_cycle.py 的一圈结果搬进 AstrBot。
+"""Self-iteration dashboard: surface iter_cycle.py results inside AstrBot.
 
-插件只读不烧模型：跑 --json 拿建议，格式化给主人看。
---commit（写 decision + log.md）只在管理员显式说「记录」时执行。
+Read-only by default. The only write path is `--commit`, gated behind an
+admin check.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from astrbot.api.star import Context, Star, register
 @register(
     "astrbot_plugin_selfdrive",
     "shingflash",
-    "自迭代外置大脑：读 iter_cycle.py 的状态与下一步建议",
-    "1.1.0",
+    "Self-iteration dashboard: read iter_cycle.py state and next-step advice",
+    "1.0.2",
 )
 class SelfDrivePlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
@@ -32,23 +32,23 @@ class SelfDrivePlugin(Star):
             self.timeout = int(self.config.get("timeout", 120) or 120)
         except (TypeError, ValueError):
             self.timeout = 120
-        logger.info(f"[selfdrive] self_dir = {self.self_dir or '(未配置)'}")
+        logger.info(f"[selfdrive] self_dir = {self.self_dir or '(unset)'}")
 
-    # ---------------- 内核 ----------------
+    # ---------------- core ----------------
 
     def _run(self, *args: str) -> tuple[int, str, str]:
         if not str(self.self_dir):
-            return 1, "", "还没配置 self_dir（iter_cycle.py 所在目录）"
+            return 1, "", "self_dir is not configured (directory holding iter_cycle.py)"
         script = self.self_dir / "iter_cycle.py"
         if not script.exists():
-            return 1, "", f"找不到 {script}"
+            return 1, "", f"script not found: {script}"
         try:
             r = subprocess.run(
                 [self.python, str(script), *args],
                 capture_output=True, timeout=self.timeout, cwd=str(self.self_dir),
             )
         except subprocess.TimeoutExpired:
-            return 1, "", f"跑超时（>{self.timeout}s）"
+            return 1, "", f"timed out after {self.timeout}s"
         except Exception as e:
             return 1, "", str(e)
         return (r.returncode,
@@ -57,11 +57,9 @@ class SelfDrivePlugin(Star):
 
     @staticmethod
     def _summary(d: dict) -> str:
-        """通用格式化：只显示 iter_cycle.py 真给出的字段，不假定任何业务字段。"""
+        """Format whatever iter_cycle.py returns; never assume business fields."""
         lines: list[str] = []
-        core = [f"{label} {d[k]}" for k, label in
-                (("pain", "痛"), ("level", "段位"), ("gate", "闸门"))
-                if d.get(k) is not None]
+        core = [f"{k} {d[k]}" for k in ("pain", "level", "gate") if d.get(k) is not None]
         if core:
             lines.append(" / ".join(core))
         skip = {"pain", "level", "gate", "pick", "blocked"}
@@ -71,66 +69,67 @@ class SelfDrivePlugin(Star):
             lines.append(f"{k}: {v}")
         pick = d.get("pick") or {}
         if isinstance(pick, dict) and pick:
-            lines.append(f"建议：{pick.get('title', '(无标题)')}")
+            lines.append(f"suggestion: {pick.get('title', '(untitled)')}")
             meta = [f"{k} {v}" for k, v in pick.items()
                     if k != "title" and v not in (None, "", [], {})]
             if meta:
-                lines.append(" · ".join(meta))
+                lines.append(" | ".join(meta))
         else:
-            lines.append(f"没有可选目标（{d.get('blocked') or '空的'}）")
-        return "\n".join(lines) if lines else "(iter_cycle.py 没有输出可读字段)"
+            lines.append(f"no candidate ({d.get('blocked') or 'empty'})")
+        return "\n".join(lines) if lines else "(iter_cycle.py returned no readable fields)"
 
-    # ---------------- 指令 ----------------
+    # ---------------- commands ----------------
 
-    @filter.command("自迭代")
+    @filter.command("selfdrive")
     async def cmd_selfdrive(self, event: AstrMessageEvent, arg: str = ""):
-        """看自迭代这一圈：/自迭代　/自迭代 详细　/自迭代 记录（管理员）"""
-        a = (arg or "").strip()
-        if a in ("记录", "commit"):
+        """Show this iteration: /selfdrive, /selfdrive detail, /selfdrive commit (admin only)"""
+        a = (arg or "").strip().lower()
+        if a in ("commit", "record"):
             fn = getattr(event, "is_admin", None)
             try:
                 is_admin = bool(fn()) if callable(fn) else False
             except Exception:
                 is_admin = False
             if not is_admin:
-                yield event.plain_result("记录会写 decision 和 log.md，只给管理员")
+                yield event.plain_result("Commit writes decision + log.md; admins only.")
                 return
             code, out, err = self._run("--commit", "--json")
             if code != 0:
-                yield event.plain_result(f"记录失败：{(err or out).strip()[:300]}")
+                yield event.plain_result(f"commit failed: {(err or out).strip()[:300]}")
                 return
             try:
                 d = json.loads(out)
-                yield event.plain_result("已记录。\n" + self._summary(d))
+                yield event.plain_result("committed.\n" + self._summary(d))
             except Exception:
-                yield event.plain_result("已记录。\n" + out.strip()[:600])
+                yield event.plain_result("committed.\n" + out.strip()[:600])
             return
 
         code, out, err = self._run("--json")
         if code != 0:
-            yield event.plain_result(f"跑挂了：{(err or out).strip()[:300]}")
+            yield event.plain_result(f"run failed: {(err or out).strip()[:300]}")
             return
         try:
             d = json.loads(out)
         except Exception:
-            yield event.plain_result(out.strip()[:800] or "没有输出")
+            yield event.plain_result(out.strip()[:800] or "no output")
             return
-        if a in ("详细", "detail", "all"):
+        if a in ("detail", "all", "verbose"):
             yield event.plain_result(json.dumps(d, ensure_ascii=False, indent=1)[:1500])
             return
         yield event.plain_result(self._summary(d))
 
-    # ---------------- 给模型的工具 ----------------
+    # ---------------- llm tool ----------------
 
     @filter.llm_tool(name="self_iter_status")
     async def self_iter_status(self, event: AstrMessageEvent) -> str:
-        """查看自迭代当前状态：痛值、段位、闸门、下一步建议干什么。只读，不写文件、不烧模型。
+        """Read the self-iteration state: pain, level, gate, and the next suggested task.
 
-        什么时候用：主人问"现在该干什么""自迭代到哪了""下一步做什么"。
+        Use when the user asks what to do next, how far the loop got, or whether
+        there is budget left. Read-only: writes nothing, calls no model.
         """
         code, out, err = self._run("--json")
         if code != 0:
-            return f"自迭代算不出来：{(err or out).strip()[:200]}"
+            return f"self-iteration unavailable: {(err or out).strip()[:200]}"
         try:
             d = json.loads(out)
         except Exception:

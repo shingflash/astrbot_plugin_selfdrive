@@ -1,23 +1,24 @@
-# 自迭代外置大脑
+# Self-iteration dashboard
 
-把 `iter_cycle.py` 的一圈结果搬进 AstrBot，只读不烧模型。
+Surface `iter_cycle.py` results inside AstrBot. Read-only by default.
 
-## 配置
+## Configuration
 
-| 项 | 说明 |
+| Key | Description |
 |---|---|
-| `self_dir` | **必填**，`iter_cycle.py` 所在目录的绝对路径 |
-| `python` | 解释器，留空用 AstrBot 自己的 python |
-| `timeout` | 单次执行超时，默认 120 秒 |
+| `self_dir` | **Required**. Absolute path of the directory containing `iter_cycle.py` |
+| `python` | Interpreter path; empty uses AstrBot's own interpreter |
+| `timeout` | Per-run timeout in seconds, default 120 |
 
-## 用法
+## Usage
 
-- `/自迭代`：核心状态 + 建议目标
-- `/自迭代 详细`：`iter_cycle.py` 输出的完整 JSON
-- `/自迭代 记录`：管理员专用，跑 `--commit` 写 decision 与 log.md
-- 工具 `self_iter_status`：模型自己查，不写文件
+- `/selfdrive` - core state plus the suggested task
+- `/selfdrive detail` - full JSON returned by `iter_cycle.py`
+- `/selfdrive commit` - admins only; runs `--commit` (writes decision + log.md)
+- LLM tool `self_iter_status` - model queries it on demand, writes nothing
 
-## 契约
+## Contract
 
-插件只读 `iter_cycle.py --json` 的输出，按字段存在与否通用格式化，
-不假定任何业务字段；`pick` 是建议对象，`blocked` 是阻塞原因。
+The plugin only reads `iter_cycle.py --json` output and formats whatever
+fields exist; it assumes no business schema. `pick` is the suggested task,
+`blocked` is the reason nothing was picked.

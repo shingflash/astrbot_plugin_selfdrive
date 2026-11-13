@@ -1,10 +1,10 @@
 name: astrbot_plugin_selfdrive
-display_name: 自迭代外置大脑
-desc: 读 iter_cycle.py 的状态与下一步建议，只读不烧模型
-version: 1.1.0
+display_name: Self-iteration dashboard
+desc: Read iter_cycle.py state and next-step advice; read-only, no model calls
+version: 1.0.2
 author: shingflash
 repo: https://github.com/shingflash/astrbot_plugin_selfdrive
 astrbot_version: ">=4.27.1,<5"
 tags:
-  - 自迭代
+  - self-iteration
   - agent

@@ -2,16 +2,16 @@
   "self_dir": {
     "type": "string",
     "default": "",
-    "description": "iter_cycle.py 所在目录的绝对路径（必填）"
+    "description": "Absolute path of the directory containing iter_cycle.py (required)"
   },
   "python": {
     "type": "string",
     "default": "",
-    "description": "解释器路径，留空用当前进程的 python"
+    "description": "Python interpreter; empty means the current process interpreter"
   },
   "timeout": {
     "type": "int",
     "default": 120,
-    "description": "单次跑 iter_cycle.py 的超时秒数"
+    "description": "Timeout in seconds for one iter_cycle.py run"
   }
 }
