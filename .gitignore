@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+# runtime state (generated locally, never commit)
+core/wallet.json
+core/archive.jsonl
+core/log.md
+core/curiosity.md
+core/iter_stats.json
+core/round_costs.jsonl
+core/_last_decision.json
+.alerts_cursor.json

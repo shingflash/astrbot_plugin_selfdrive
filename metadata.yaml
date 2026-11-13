@@ -1,7 +1,7 @@
 name: astrbot_plugin_selfdrive
 display_name: Self-iteration dashboard
-desc: Read iter_cycle.py state and next-step advice; read-only, no model calls
-version: 1.0.2
+desc: Self-iteration loop core (pools, pick, machine-scored review, ledger) plus a read-only chat dashboard
+version: 2.0.0
 author: shingflash
 repo: https://github.com/shingflash/astrbot_plugin_selfdrive
 astrbot_version: ">=4.27.1,<5"

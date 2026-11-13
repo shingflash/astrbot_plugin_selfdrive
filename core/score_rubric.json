@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "updated": "2026-11-13 17:10",
+  "why": "验收判据外置：能机械算的绝不给模型算，模型只碰主观项。2026-11-13 主人定：不单独开优化轮，每一轮（好奇/灵感/优化/学习/维持）都参与评分。",
+  "score_range": [0, 100],
+  "base": 60,
+  "layers": {
+    "decision": [
+      {"id": "d_pick", "w": 10, "desc": "本轮是否选出具体可执行目标", "rule": "pick 非空；blocked 明确时为中性"},
+      {"id": "d_cost_cap", "w": 8, "desc": "单轮成本不超上限、不越日配额", "rule": "cost_rmb<=0.2 且 quota!=empty"},
+      {"id": "d_gate", "w": 10, "desc": "闸门/停机时没有硬上", "rule": "gate=stop 或 level=halt 时 pick 必须为空"},
+      {"id": "d_streak", "w": 8, "desc": "没有连续原地转圈", "rule": "pick_streak<=3；同类 kind 连续<=4"},
+      {"id": "d_mix", "w": 6, "desc": "一天内动作类型不单一", "rule": "最近15轮 kind 种类>=3"},
+      {"id": "d_curiosity_fresh", "w": 6, "desc": "好奇/灵感候选不是吃过的、不是陈的", "rule": "curiosity.pool>0 或本轮无好奇候选"},
+      {"id": "d_cost_worth", "w": 6, "desc": "花钱的轮次配得上产出强度", "rule": "cost_rmb>0 时 tier 属于 t2/t3；0 成本轮不扣分"}
+    ],
+    "archive": [
+      {"id": "a_backup", "w": 10, "desc": "改动前有备份", "rule": "backup 字段非空且文件存在"},
+      {"id": "a_files_real", "w": 10, "desc": "声称改的文件真的被动过", "rule": "files 路径存在且 mtime 在 ts 前后 3 小时内"},
+      {"id": "a_verify_proof", "w": 12, "desc": "verify 里有可复现证据", "rule": "命中 X/Y、rc=、PASS、test_、具体命令、具体数值 之一"},
+      {"id": "a_no_self_praise", "w": 10, "desc": "verify 没有不可证伪的自夸", "rule": "不命中 forbidden_self_praise"},
+      {"id": "a_used_by", "w": 8, "desc": "上一轮的改动被下一次真用上了", "rule": "kind in meta/optimize 时 used_by 必须非空"},
+      {"id": "a_result_consistent", "w": 6, "desc": "result 与证据一致", "rule": "result=pass 时 a_verify_proof 必须成立，否则降为 partial"}
+    ]
+  },
+  "panel": {
+    "note": "子代理层：只有客观分算不出的主观项才送模型，强制回 JSON，不看 archive 历史、不看版本号、不看是谁写的。",
+    "items": [
+      {"id": "p_solves", "w": 5, "desc": "这次改动是否真的解决了 goal 描述的那个问题", "scale": [0, 5]},
+      {"id": "p_simplest", "w": 4, "desc": "是否放着更简单的做法没走", "scale": [0, 5]},
+      {"id": "p_side_effect", "w": 4, "desc": "有没有顺手改了无关的东西", "scale": [0, 5]},
+      {"id": "p_evidence", "w": 4, "desc": "给出的证据是否撑得住结论（不是只看它说 pass）", "scale": [0, 5]}
+    ],
+    "roles": ["critic", "defender"],
+    "roles_note": "critic 必须交可测反例，defender 必须交可测证据；两边不设裁判，分歧留记录。",
+    "disagreement_flag": 0.35,
+    "budget": {"max_per_round_rmb": 0.03, "only_when_gate": "normal|throttle"}
+  },
+  "human": {
+    "note": "金标：主人手改过或明确认可的版本，diff 距离算分，权重最高，可以一票否决机械层。",
+    "gold_dir": "self/score_gold",
+    "weight": 3
+  },
+  "forbidden_self_praise": ["完美", "彻底", "大幅", "显著提升", "非常好", "基本没问题", "应该可以", "应该没问题", "无需验证", "已经全部解决"],
+  "kind_weights": {
+    "curiosity": 1.0,
+    "explore": 1.0,
+    "learn": 1.0,
+    "optimize": 1.0,
+    "meta": 1.0,
+    "maintain": 0.8,
+    "practice": 1.0
+  }
+}

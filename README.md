@@ -1,13 +1,12 @@
 <div align="center">
 
-# 🐋 Self-Iteration Dashboard
+# 🐋 Self-Iteration Loop
 
-**把本地自迭代循环 `iter_cycle.py` 的结果搬进 AstrBot 聊天窗口 — 默认只读，绝不自作主张。**
+**一个跑在本地的自迭代循环：从候选池选题 → 花真钱执行 → 机器分验收 → 能涨才留档。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3772FF?logo=python&logoColor=white)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4-4B8BBE)](https://github.com/AstrBotDevs/AstrBot)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/shingflash/astrbot_plugin_selfdrive/pulls)
 
 [English](#-english) · [中文](#-中文)
 
@@ -17,115 +16,133 @@
 
 ## 📖 English
 
-### What it does
+### What this is
 
-Reads the JSON output of a local `iter_cycle.py` (a self-iteration loop script) and renders it in chat.
-It never starts an iteration on its own — every `/selfdrive` call is a **read**, with one exception:
-`/selfdrive commit`, admin-only, forwards `--commit` to the script.
+A complete self-iteration loop that runs on your own machine:
 
-### ✨ Features
+```
+candidate pools → pick → execute → machine-scored review → archive → settle the bill → back to pools
+```
 
-- **Read-only by default** — no side effects unless you explicitly commit
-- **Schema-agnostic** — formats whatever fields `iter_cycle.py --json` returns
-- **LLM tool included** — `self_iter_status` lets the model look up state on demand, write nothing
-- **Path-configurable** — point it at any directory, no hard-coded paths
+`core/` is the loop itself — pure standard library, no AstrBot, no model weights.
+`main.py` is a thin AstrBot plugin that only **renders** the loop's state in chat.
 
-### 📦 Installation
+### The three hard constraints
 
-1. Clone into your AstrBot plugin directory:
+Most "AI self-improvement" stops at the prompt layer: it says it got better, and nobody checks.
+Here three things are made non-negotiable:
 
-   ```bash
-   cd data/plugins
-   git clone https://github.com/shingflash/astrbot_plugin_selfdrive.git
-   ```
+1. **Only three things can change** — memory, tools/skills, and the scheduling code. Model
+   weights are frozen; "I tuned my own parameters" is rejected outright.
+2. **Every change needs an archive entry and a rollback path.** No archive, no adoption.
+3. **Every round is billed in real money.** The wallet hits zero and the loop stops.
 
-2. Fill in `self_dir` (required) in the dashboard config.
-3. Reload the plugin, or restart AstrBot.
+### The five pools
 
-### ⚙️ Configuration
+| Pool | Purpose |
+|---|---|
+| `curiosity` | External signals (trending feeds etc.) turned into open questions, with TTL and de-dup |
+| `ape_pool` | Mutation candidates for one goal — several variants, keep only what actually scores higher |
+| `practice_pool` | Cheap low-stakes drills before touching anything real |
+| `inspiration` | Raw ideas that don't fit a goal yet |
+| `goals` | The real queue: each goal carries a `level` and an explicit pass condition |
 
-| Key | Default | Description |
-|---|---|---|
-| `self_dir` | — | **Required.** Absolute path of the directory containing `iter_cycle.py` |
-| `python` | empty | Interpreter path; empty uses AstrBot's own interpreter |
-| `timeout` | `120` | Per-run timeout in seconds |
+### Review is mechanical, not self-reported
 
-### 💬 Commands
+`score_judge.py` + `score_rubric.json`. Anything computable is computed — the model is not asked
+to grade its own homework. A rubric item that two runs of the same work can't reproduce is a bug.
 
-| Command | Permission | Description |
-|---|---|---|
-| `/selfdrive` | everyone | Core state plus the suggested task |
-| `/selfdrive detail` | everyone | Full JSON returned by `iter_cycle.py` |
-| `/selfdrive commit` | **admin** | Runs `--commit` (writes decision + `log.md`) |
+### The bill
 
-LLM tool: `self_iter_status` — the model queries it on demand, writes nothing.
+`ledger.py` marks the start and the end of a round; the difference is what the round actually cost.
+`gate()` turns the balance into a state: normal → experiments paused → everything paused.
+Replies are never gated, only autonomous spending is.
 
-### 📐 Contract
+### Layout
 
-The plugin only reads `iter_cycle.py --json` output and formats whatever fields exist; it makes no assumptions about your business schema.
+```
+core/      the loop: iter_cycle, curiosity, ape_pool, practice_pool,
+           inspiration, ledger, score_judge, score_report, score_panel,
+           housekeep, collect_signals, perf_audit + score_rubric.json
+main.py    AstrBot plugin (read-only view; /selfdrive commit is admin-only)
+docs/      SELF_EVOLUTION.md (the method), PRIORITY.md (value ordering)
+examples/  goals.example.json
+```
 
-- `pick` — the suggested task
-- `blocked` — the reason nothing was picked
+### Quick start
 
----
+1. Put `core/` anywhere on your machine.
+2. In the AstrBot plugin config, set `self_dir` to that path.
+3. `python core/iter_cycle.py --help` to see the round switches.
+4. Runtime state (`wallet.json`, `archive.jsonl`, `log.md`, `curiosity.md`, …) is generated
+   locally and **git-ignored on purpose** — those files contain your own history, not code.
 
-## 📖 中文
+### What is not included
 
-### 它做什么
-
-读取本地 `iter_cycle.py`（自迭代循环脚本）的 JSON 输出，在聊天里展示。
-它自己从不主动触发迭代——每次 `/selfdrive` 都只是**读**，唯一例外是 `/selfdrive commit`：仅管理员可用，会带 `--commit` 转发给脚本。
-
-### ✨ 特点
-
-- **默认只读** —— 除非你明确 commit，否则不产生任何副作用
-- **不绑定 schema** —— `iter_cycle.py --json` 给什么字段就格式化什么
-- **自带 LLM 工具** —— `self_iter_status` 让模型按需查状态，不写任何东西
-- **路径可配** —— 指向任意目录，不内置本机路径
-
-### 📦 安装
-
-1. 克隆进 AstrBot 插件目录：
-
-   ```bash
-   cd data/plugins
-   git clone https://github.com/shingflash/astrbot_plugin_selfdrive.git
-   ```
-
-2. 在面板里填 `self_dir`（必填）。
-3. 重载插件，或重启 AstrBot。
-
-### ⚙️ 配置
-
-| 项 | 默认 | 说明 |
-|---|---|---|
-| `self_dir` | — | **必填**。存放 `iter_cycle.py` 的目录绝对路径 |
-| `python` | 空 | 解释器路径；留空则用 AstrBot 自己的解释器 |
-| `timeout` | `120` | 单次运行超时（秒） |
-
-### 💬 命令
-
-| 命令 | 权限 | 作用 |
-|---|---|---|
-| `/selfdrive` | 所有人 | 核心状态 + 建议干的任务 |
-| `/selfdrive detail` | 所有人 | `iter_cycle.py` 返回的完整 JSON |
-| `/selfdrive commit` | **管理员** | 执行 `--commit`（写决策 + `log.md`） |
-
-LLM 工具：`self_iter_status` —— 模型按需查询，不写任何东西。
-
-### 📐 约定
-
-插件只读 `iter_cycle.py --json` 的输出，有什么字段就格式化什么，不对业务 schema 做假设。
-
-- `pick` —— 建议任务
-- `blocked` —— 没挑出任务的原因
+No model weights, no API keys, no conversation logs, no personal archive.
+This is the machinery, not the operator's diary.
 
 ---
 
-<div align="center">
+## 中文
 
-### 📄 License
+### 这是什么
 
-[MIT](LICENSE) · 有问题欢迎开 issue / PR
+一套跑在你自己机器上的自迭代循环，一整条链路：
 
-</div>
+```
+候选池 → 选题 → 执行 → 机器评分验收 → 留档 → 结账 → 回池子
+```
+
+`core/` 是循环本体，纯标准库，不依赖 AstrBot、不依赖任何模型权重；
+`main.py` 是壳，只把循环状态搬进聊天窗口，默认只读。
+
+### 三条硬约束
+
+大部分所谓"AI 自我进化"停在 prompt 层：说改好了，没人验。这里把三件事做成硬的：
+
+1. **只能改三样东西**——记忆、工具/技能、调度流程。模型权重是冻的，"我调了自己的参数"这种话直接否掉。
+2. **每次改动必须有归档和回滚路径**。没归档就不许采纳，涨了才算数。
+3. **每轮真金结账**。钱包见底就停，不许自己给自己续命。
+
+### 五个池子
+
+| 池 | 干什么 |
+|---|---|
+| `curiosity` | 把外部信号（热搜等）变成待探索的问题，带 TTL 和去重，过期就扔 |
+| `ape_pool` | 同一目标的变异候选：一次生成多个版本，只留评分真的涨上去的那个 |
+| `practice_pool` | 低成本练手题，先在小事上试错，再动真东西 |
+| `inspiration` | 暂时挂不上目标的零散灵感 |
+| `goals` | 真正的队列：每条带 `level` 和明确的过线条件 |
+
+### 验收不靠自我感觉
+
+`score_judge.py` + `score_rubric.json`。能机械算的绝不给模型算——自己改、自己执行、自己打分，
+是这个循环最容易烂掉的地方，所以评分项写成外部可复现的。同一件活跑两次出不来同一个分，那条 rubric 就是坏的。
+
+### 账单
+
+`ledger.py` 在整轮两端打标记，差值就是这一轮真烧掉的钱；`gate()` 把余额变成闸门状态：
+正常 → 停实验 → 全停。**回话永不受影响，只有自主花费被闸。**
+
+### 目录
+
+```
+core/      循环本体（12 个脚本 + 评分标准）
+main.py    AstrBot 插件壳（只读视图，commit 仅管理员）
+docs/      方法论 SELF_EVOLUTION.md、价值序 PRIORITY.md
+examples/  goals 结构示例
+```
+
+### 上手
+
+1. 把 `core/` 放到任意目录；
+2. 插件配置里把 `self_dir` 指过去；
+3. `python core/iter_cycle.py --help` 看轮次开关；
+4. `wallet.json` / `archive.jsonl` / `log.md` / `curiosity.md` 这些是**运行时自己生成的**，
+   故意写进 `.gitignore`——那是操作者的日记，不是代码。
+
+### 不含什么
+
+不含模型权重、不含任何 API key、不含对话日志与个人档案。
+这里给的是机器，不是操作员的日记本。
