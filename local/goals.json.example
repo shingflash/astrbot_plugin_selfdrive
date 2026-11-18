@@ -1,0 +1,11 @@
+{
+  "goals": [
+    {
+      "id": "g1",
+      "title": "示例目标",
+      "kind": "maintain",
+      "cost_rmb": 0,
+      "priority": 3
+    }
+  ]
+}

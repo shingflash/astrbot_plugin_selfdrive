@@ -1,0 +1,10 @@
+{
+  "chains": {
+    "engine": {
+      "on": true,
+      "features": {
+        "pick": true
+      }
+    }
+  }
+}

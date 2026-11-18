@@ -1,31 +1,19 @@
-# CHANGELOG
+# 变更记录
 
-## 2.0.0
+## 2.0.0 — 2026-11-18
 
-- Repo scope changed: from "dashboard plugin" to **loop core + thin shell**
-- Added `core/` — 12 scripts: `iter_cycle` (scheduler/pick/gate/pain), `curiosity`,
-  `ape_pool`, `practice_pool`, `inspiration`, `ledger`, `score_judge`, `score_report`,
-  `score_panel`, `housekeep`, `collect_signals`, `perf_audit`, plus `score_rubric.json`
-- Added `docs/SELF_EVOLUTION.md` (the method) and `docs/PRIORITY.md` (value ordering)
-- Added `examples/goals.example.json`
-- Added `.gitignore`: runtime state (`wallet.json`, `archive.jsonl`, `log.md`,
-  `curiosity.md`, `iter_stats.json`, `round_costs.jsonl`) is generated locally and never committed
-- Removed a mistakenly committed `__pycache__/main.cpython-314.pyc`
-- README rewritten to explain the design (pools → pick → execute → machine review →
-  archive → settle) instead of listing features
+首个公开版：把私有运行环境里跑了两个月的自迭代引擎抽出来，去掉个人的一半。
 
-## Unreleased
+### 发布
+- `core/`：八个池子的料源 + 一圈引擎 + 机械判官 + 记账/疲劳/收敛护栏，29 个文件，纯标准库。
+- 价值加分改成收缩公式 `(avg*w + 4*12)/(w+12)`：样本少往中位分靠，避免小样本把某一池顶死。
+- `local/`：私货位定成自定义格式（余额、信号、课程表、片单、目标），缺文件即降级。
 
-- README rewritten as bilingual (English + 中文) with badges and a sectioned layout
-
-## 1.0.2
-
-- All in-code instruction text switched to English: command `/selfdrive`,
-  parameter aliases `commit` / `detail`, log and reply strings
-- Removed hardcoded machine paths; `self_dir` is a required config value
-- Generic formatter: only fields actually returned by `iter_cycle.py` are shown
-- Non-numeric `timeout` falls back to 120
-
-## 1.0.0
-
-- Initial release: `/selfdrive` command + `self_iter_status` tool
+### 未发布（本地私有）
+- `ledger.py` — 余额接入适配器：读本机配置与私有账本目录、打上游余额接口，硬编码本机路径
+- `collect_signals.py` — 本机信号采集：CPU/内存/端口 + 使用者生理与作息信号（bio_signals）
+- `curriculum_full.py` — 私人课程表（全量专业与课程清单），属定制内容
+- `curriculum_v1_backup.py` — 同上旧版
+- `perf_audit.py` — 本机硬件体检，含私有运维对象（浏览器缓存、交易页保活）
+- `fetch_ape.py` — 个人片单抓取（写死某个 UP 主）
+- `_t_k.py` — 临时草稿

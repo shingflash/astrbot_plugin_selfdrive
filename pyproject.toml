@@ -1,0 +1,10 @@
+[project]
+name = "selfdrive"
+version = "2.0.0"
+description = "自迭代引擎：机器自己派活、自己验收、台账可查"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/shingflash/selfdrive"

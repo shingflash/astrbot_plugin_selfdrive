@@ -27,7 +27,9 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-SELF = Path(__file__).resolve().parent
+import os  # SELFDRIVE_HOME
+HERE = Path(__file__).resolve().parent  # 代码目录
+SELF = Path(os.environ.get("SELFDRIVE_HOME") or HERE)  # 数据目录（可外置）
 WS = SELF.parent
 RUBRIC_FILE = SELF / "score_rubric.json"
 HISTORY_FILE = SELF / "score_history.jsonl"
@@ -97,7 +99,13 @@ def _parse_ts(s) -> datetime | None:
 
 
 def _recent_kinds(n: int = 15) -> list:
-    """最近 n 轮的 kind 序列：动作类型太单一要扣分，但样本不足时不判。"""
+    """最近 n 轮的「环节」序列：动作太单一要扣分，但样本不足时不判。
+
+    好奇心轮按 curiosity_cat 细分（热点话题/前沿科技/灵感/实践…）。
+    原因：好奇轮零成本 +10 分，长期压死 explore/maintain/archive，kind 只剩
+    curiosity 一种，d_mix 要求 3 种 → 结构性不可满足的假红灯（2026-11-16 挖出，
+    11-17 主人下令维修）。细分后验算由 2 种变 6 种。
+    """
     if not ITER_OUT.exists():
         return []
     out = []
@@ -105,9 +113,15 @@ def _recent_kinds(n: int = 15) -> list:
         d = read_json(f, None)
         if not isinstance(d, dict):
             continue
-        k = (d.get("pick") or {}).get("kind") or d.get("blocked")
+        pick = d.get("pick") or {}
+        k = pick.get("kind") or d.get("blocked")
         if k:
-            out.append(str(k))
+            k = str(k)
+            if k == "curiosity":
+                cat = str(pick.get("curiosity_cat") or "").strip()
+                if cat:
+                    k = f"curiosity:{cat}"
+            out.append(k)
     return out
 
 

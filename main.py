@@ -20,7 +20,7 @@ from astrbot.api.star import Context, Star, register
     "astrbot_plugin_selfdrive",
     "shingflash",
     "Self-iteration dashboard: read iter_cycle.py state and next-step advice",
-    "1.0.2",
+    "2.0.0",
 )
 class SelfDrivePlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):

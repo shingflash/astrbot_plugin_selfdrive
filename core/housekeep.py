@@ -40,7 +40,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 CST = timezone(timedelta(hours=8))
-SELF = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent  # 代码目录
+SELF = Path(os.environ.get("SELFDRIVE_HOME") or HERE)  # 数据目录（可外置）
 WORK = SELF.parent
 ITER_OUT = SELF / "iter_out"
 LOG = SELF / "log.md"

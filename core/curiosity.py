@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import ssl
 import sys
 import urllib.parse
@@ -26,12 +27,21 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SELF = Path(__file__).resolve().parent
+import os  # SELFDRIVE_HOME
+HERE = Path(__file__).resolve().parent  # 代码目录
+SELF = Path(os.environ.get("SELFDRIVE_HOME") or HERE)  # 数据目录（可外置）
+if str(SELF) not in sys.path:
+    sys.path.insert(0, str(SELF))
+
+import topic_ingest   # 采集层：多源全量灌进 topic.db
+import topic_store    # 存储层：去重 / 取题 / 用完剔除
+
 OUT = SELF / "goals_curiosity.json"
 CST = timezone(timedelta(hours=8))
 TTL_H = 48.0          # 热点 48 小时就凉了，过期的候选别再占坑
 MAX_ITEMS = 6         # 一次抓取最多丢 6 条进候选池，别把池子灌满
 MAX_POOL_ITEMS = 12   # 池子总上限：热搜 6 条 + 刷视频等外部追加，超了按优先级砍
+POOL_SCAN = 200       # 从 topic.db 一次捞多少条候选给分类器筛（2026-11-17 建库后加）
 TIMEOUT = 6.0
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -113,14 +123,33 @@ def baidu_hot() -> list[dict]:
     return out[:30]
 
 
-def classify(word: str, rank: int) -> tuple[str, int]:
+_ASCII_SHORT = re.compile(r"^[a-z0-9+.#-]{1,4}$")
+
+
+def _kw_hit(low: str, kw: str) -> bool:
+    """短英文词必须按词边界匹配。
+
+    子串匹配会把 "ai" 命中 failures / training / rain，把 "gpu" 命中别的东西，
+    2026-11-17 实测 "Three small failures…" 被当成 AI 前沿给了 p5。
+    """
+    if _ASCII_SHORT.match(kw):
+        return re.search(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", low) is not None
+    return kw in low
+
+
+def classify(word: str, rank: int, kind: str = "") -> tuple[str, int]:
     low = word.lower()
     for name, pri, kws in CATS:
-        if any(k in low for k in kws):
+        if any(_kw_hit(low, k) for k in kws):
             return name, pri
-    # 没命中关键词：只收前 10 位的，算「热点话题」（3），后面的当噪声丢掉
-    if rank <= 10:
-        return "热点话题", 3
+    # 没命中关键词，就按来源兜底：顶刊论文天然算前沿、开源/技术站算现有技术
+    if kind == "sci":
+        return "前沿科技", 3
+    if kind in ("tech", "lab"):
+        return "现有技术", 3
+    # 热榜前 10 位给个「热点话题」，后面的当噪声丢掉；分给 p2，让位给顶刊/开源项目
+    if kind == "hot" and rank <= 10:
+        return "热点话题", 2
     return "", 0
 
 
@@ -135,14 +164,48 @@ def banned(word: str) -> tuple[bool, str]:
 def build(dry: bool = False) -> dict:
     words: list[dict] = []
     src_stat: dict[str, int] = {}
-    for fn in (bili_hot, baidu_hot):
+    ing: dict = {}
+
+    # 1) 用完剔除：把上一次池子里真被吃掉的候选从库里划掉
+    try:
+        cleared = topic_store.sync_from_decisions()
+        if cleared:
+            src_stat["_cleared"] = cleared
+    except Exception as e:
+        print(f"[warn] sync_from_decisions 失败: {e}")
+
+    # 2) 采集多源热点入库（共享池；带冷却，别每次重抓 25 个源）
+    if not dry:
         try:
-            got = fn()
-            words.extend(got)
-            src_stat[fn.__name__] = len(got)
-        except Exception as e:  # 单个源挂了不影响另一个
-            src_stat[fn.__name__] = -1
-            print(f"[warn] {fn.__name__} 抓取失败: {e}")
+            ing = topic_ingest.maybe_run()
+            src_stat["_ingest"] = ing.get("rows", 0)
+        except Exception as e:
+            print(f"[warn] 采集失败: {e}")
+            src_stat["_ingest"] = -1
+
+    # 3) 从库里取候选——不限 kind，热榜/媒体/论文/实验室全给，交给下面分类器筛
+    try:
+        pool = topic_store.pick(POOL_SCAN, kinds=())
+    except Exception as e:
+        pool = []
+        print(f"[warn] 取库失败: {e}")
+    for i, r in enumerate(pool):
+        words.append({"word": r["title"], "source": r["source"], "url": r["url"], "kind": r["kind"],
+                      "rank": i + 1, "dkey": r["dkey"], "n_src": int(r.get("n_src") or 1)})
+        src_stat[r["source"]] = src_stat.get(r["source"], 0) + 1
+
+    # 4) 库空/没料 → 退回老路（B站 + 百度热搜），保证不会空手
+    if not words:
+        for fn in (bili_hot, baidu_hot):
+            try:
+                got = fn()
+                for _w in got:
+                    _w.setdefault("kind", "hot")
+                words.extend(got)
+                src_stat[fn.__name__] = len(got)
+            except Exception as e:  # 单个源挂了不影响另一个
+                src_stat[fn.__name__] = -1
+                print(f"[warn] {fn.__name__} 抓取失败: {e}")
 
     seen: set[str] = set()
     items: list[dict] = []
@@ -161,40 +224,75 @@ def build(dry: bool = False) -> dict:
             if len(drop_detail) < 20:
                 drop_detail.append(f"{why}:{word}")
             continue
-        cat, pri = classify(word, int(w["rank"]))
+        cat, pri = classify(word, int(w["rank"]), str(w.get("kind") or ""))
         if not cat:
             dropped["noise"] += 1
             continue
-        hid = "c_" + hashlib.md5(f"{cat}:{word}:{_day()}".encode("utf-8")).hexdigest()[:8]
+        n_src = int(w.get("n_src") or 1)
+        # 跨源共振：同一件事被两个以上源同时报，才配叫热点
+        if n_src >= 3:
+            pri = min(5, pri + 2)
+        elif n_src == 2:
+            pri = min(5, pri + 1)
+        dk = w.get("dkey") or ""
+        hid = "c_" + (dk[:10] if dk else hashlib.md5(
+            f"{cat}:{word}:{_day()}".encode("utf-8")).hexdigest()[:10])
+        shown = word if len(word) <= 90 else word[:88] + "…"
         items.append({
             "id": hid,
+            "dkey": dk,
             "kind": "curiosity",
-            "title": f"好奇：{word}（{cat}·{w['source']}第{w['rank']}位）",
-            "keyword": word,
+            "title": f"好奇：{shown}（{cat}·{w['source']}" + (f"·{n_src}源共振" if n_src >= 2 else "") + "）",
+            "keyword": word[:90],
             "curiosity_cat": cat,
             "priority": pri,
+            "n_src": n_src,
             "cost_rmb": 0,
             "source": w["source"],
             "source_url": w["url"],
             "ttl_h": TTL_H,
             "tier": "t2_write_low",
-            "verify": (f"读完/查完「{word}」后写进 self/curiosity.md：一条当日条目含【是什么】【为什么现在热】"
-                       f"【我能用到哪】三段，至少 120 字并附来源链接；说不清意义的就写'不值得'，"
-                       f"也要留一行记录，不许空手结项"),
+            "verify": (f"读完/查完「{word[:60]}」后写进 self/curiosity.md，条目必须落成至少一条可用的东西："
+                       f"①一条能马上用到自己流程/工具上的改动（写清改哪个文件、哪一行、改成什么），或"
+                       f"②一次判断修正（原本我怎么想→现在怎么改）。【是什么】【为什么现在热】压到 150 字内当背景。"
+                       f"两条都落不了的，在条目末尾写'用不上：<原因>'，这轮按 negative 记，不算有效轮"),
         })
 
-    # 同分类最多 2 条，别让一个分类吃光池子
-    items.sort(key=lambda x: (-int(x["priority"]), x["source"], x["source_url"]))
-    per_cat: dict[str, int] = {}
-    capped: list[dict] = []
+    # 排序 = 分类分*10 + 跨源共振*6（同一件事几个源都报才算真热）
+    items.sort(key=lambda x: (-(int(x["priority"]) * 10 + int(x.get("n_src") or 1) * 6),
+                              x["source"], x["source_url"]))
+    # 分类轮转取题：先让每个领域各出一条，不够再补第二轮。
+    # 只按分数取的话，GitHub 项目能把「前沿科技」两个名额吃光，顶刊一条都进不来。
+    buckets: dict[str, list] = {}
     for it in items:
-        c = it["curiosity_cat"]
-        if per_cat.get(c, 0) >= 2:
-            continue
-        per_cat[c] = per_cat.get(c, 0) + 1
-        capped.append(it)
+        buckets.setdefault(it["curiosity_cat"], []).append(it)
+    cat_order = sorted(buckets, key=lambda c: -max(
+        int(x["priority"]) * 10 + int(x.get("n_src") or 1) * 6 for x in buckets[c]))
+    per_src: dict[str, int] = {}
+    per_cat: dict[str, int] = {}
+    taken: set = set()
+    capped: list[dict] = []
+    for _rnd in range(3):
         if len(capped) >= MAX_ITEMS:
             break
+        for c in cat_order:
+            if len(capped) >= MAX_ITEMS:
+                break
+            if c == "热点话题" and _rnd == 0:
+                continue   # 热榜碎片先让位，池子填不满才拿它们补位
+            for it in buckets[c]:
+                if it["id"] in taken:
+                    continue
+                s = it["source"]
+                if per_src.get(s, 0) >= 2:   # 同源最多 2 条
+                    continue
+                if per_cat.get(c, 0) >= 2:   # 同分类最多 2 条
+                    continue
+                capped.append(it)
+                taken.add(it["id"])
+                per_src[s] = per_src.get(s, 0) + 1
+                per_cat[c] = per_cat.get(c, 0) + 1
+                break
 
     doc = {
         "generated_at": datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S"),
@@ -204,6 +302,20 @@ def build(dry: bool = False) -> dict:
         "dropped_detail": drop_detail,
         "items": capped,
     }
+    if not dry and OUT.exists():
+        # 热搜刷新不许冲掉外部追加的条目（灵感 kind=inspiration 那条腿）：
+        # 它们不是从热搜来的，重抓一次热搜就把它们抹掉的话，灵感池永远开不了张。
+        try:
+            old = json.loads(OUT.read_text(encoding="utf-8-sig")).get("items") or []
+        except Exception:
+            old = []
+        have = {str(it.get("keyword", "")).strip().lower() for it in capped}
+        carry = [it for it in old
+                 if isinstance(it, dict) and it.get("kind") in ("inspiration", "explore")
+                 and str(it.get("keyword", "")).strip().lower() not in have]
+        if carry:
+            capped = (carry + capped)[:MAX_POOL_ITEMS]
+            doc["items"] = capped   # 必须回写：capped 是新列表，不回写 carry 永远进不了文件
     if not dry:
         OUT.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     return doc
@@ -229,9 +341,10 @@ def _mk_item(word: str, cat: str, pri: int, source: str, url: str) -> dict:
         "verify": ((f"动手做完「{word}」后写进 self/practice/log.md：做了什么、结果、可复现命令或"
                     f"产物文件路径；做不成的写清卡在哪一步并附报错原文，不许空手结项")
                    if cat == "实践" else
-                   (f"读完/查完「{word}」后写进 self/curiosity.md：一条当日条目含【是什么】【为什么现在热】"
-                    f"【我能用到哪】三段，至少 120 字并附来源链接；说不清意义的就写'不值得'，"
-                    f"也要留一行记录，不许空手结项")),
+                   (f"读完/查完「{word}」后写进 self/curiosity.md，条目必须落成至少一条可用的东西："
+                    f"①一条能马上用到自己流程/工具上的改动（写清改哪个文件、哪一行、改成什么），或"
+                    f"②一次判断修正（原本我怎么想→现在怎么改）。【是什么】【为什么现在热】压到 150 字内当背景。"
+                    f"两条都落不了的，在条目末尾写'用不上：<原因>'，这轮按 negative 记，不算有效轮")),
     }
 
 

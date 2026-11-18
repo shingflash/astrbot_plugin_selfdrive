@@ -26,7 +26,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-SELF = Path(__file__).resolve().parent
+import os  # SELFDRIVE_HOME
+HERE = Path(__file__).resolve().parent  # 代码目录
+SELF = Path(os.environ.get("SELFDRIVE_HOME") or HERE)  # 数据目录（可外置）
 WS = SELF.parent
 RUBRIC_FILE = SELF / "score_rubric.json"
 ARCHIVE = SELF / "archive.jsonl"

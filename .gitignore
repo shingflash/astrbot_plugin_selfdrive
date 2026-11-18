@@ -1,14 +1,13 @@
 __pycache__/
-*.py[cod]
 *.pyc
-.venv/
-venv/
-# runtime state (generated locally, never commit)
-core/wallet.json
-core/archive.jsonl
-core/log.md
-core/curiosity.md
-core/iter_stats.json
-core/round_costs.jsonl
-core/_last_decision.json
-.alerts_cursor.json
+.pytest_cache/
+# 运行数据：账本、日志、池子快照、个人配置，一律不入库
+data/
+local/*
+!local/README.md
+!local/*.example
+*.bak*
+*.jsonl
+wallet.json
+bio_signals.json
+log.md
